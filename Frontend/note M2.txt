@@ -1,0 +1,6 @@
+"Pull về dùng được rồi. Lưu ý quan trọng:
+
+Tên hàm đúng: tipTrack() không phải tip(), reportTrack(id, reason) có thêm reason
+Track dùng isActive không phải isHidden, field là ipfsHash + title thay vì metaCID
+Không có getAllTracks() — dùng getAllActiveTracks() trong contractUtils (tự loop)
+3 hàm upload/tip/withdraw đang bị 'not implemented' — chờ M1 update"
