@@ -1,0 +1,26 @@
+## 🔍 Review M4 — Sau khi đọc ABI thật
+
+### ✅ Đã confirm hoạt động
+- AccessControl với ADMIN_ROLE ✅
+- ReentrancyGuard (có error ReentrancyGuardReentrantCall) ✅
+- tracks(), tipRecords(), reports(), reportCount() đọc được ✅
+- reportTrack(trackId, reason) — có thêm reason string ✅
+- TuneToken: mint(), balanceOf(), approve(), transfer() ✅
+
+### ⚠️ Những hàm đang "not implemented yet"
+Theo bytecode, uploadTrack / tipTrack / withdrawTips 
+hiện revert với message "TuneChain: not implemented yet".
+Cần M1 implement để frontend test được:
+- [ ] uploadTrack(string ipfsHash, string title)
+- [ ] tipTrack(uint trackId, uint amount)
+- [ ] withdrawTips()
+
+### 📋 Câu hỏi cần M1 trả lời
+1. Constructor nhận _admins: address[] (đúng 4 địa chỉ theo bytecode).
+   Khi chạy hardhat node local thì truyền địa chỉ nào vào mảng này?
+2. withdrawTips() không có trackId — tức là rút tất cả 
+   hay rút theo từng track? Logic thế nào?
+3. Escrow 24h lock theo SRS — implement ở đâu 
+   nếu withdrawTips chưa có trackId?
+4. Deploy xong gửi mình 2 địa chỉ:
+   VITE_TUNECHAIN_ADDRESS và VITE_TUNETOKEN_ADDRESS
