@@ -3,7 +3,7 @@
 // Frontend gửi file lên đây, backend upload lên Pinata và trả về CID
 
 import { Router, Request, Response } from "express";
-import { uploadFile, uploadJSON, getIpfsUrl, TrackMetadata } from "../services/ipfsService";
+import { uploadFile, uploadJSON, getIpfsUrl, TrackMetadata } from "../services/ipfsService.js";
 
 const router = Router();
 
