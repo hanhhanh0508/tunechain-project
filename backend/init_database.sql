@@ -1,12 +1,10 @@
 
------Tạo database-----
 CREATE DATABASE IF NOT EXISTS tunechain
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
 USE tunechain;
 
------ Bảng lưu tổng lượt xem của từng track -----
 CREATE TABLE IF NOT EXISTS track_views (
   id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   track_id    VARCHAR(100) NOT NULL UNIQUE  COMMENT 'ID track trên blockchain (số hoặc chuỗi)',
@@ -16,7 +14,6 @@ CREATE TABLE IF NOT EXISTS track_views (
   INDEX idx_track_id (track_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Tổng view count của mỗi track';
 
------ Bảng lưu log từng lượt xem (để rate-limit theo IP) -----
 CREATE TABLE IF NOT EXISTS view_logs (
   id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   track_id    VARCHAR(100) NOT NULL    COMMENT 'ID track được xem',
@@ -26,6 +23,4 @@ CREATE TABLE IF NOT EXISTS view_logs (
   INDEX idx_viewed_at (viewed_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Lịch sử từng lượt xem (dùng cho rate-limit)';
 
------ Kiểm tra tạo thành công -----
-SELECT 'Database tunechain đã được khởi tạo thành công!' AS message;
 SHOW TABLES;
