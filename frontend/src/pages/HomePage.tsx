@@ -19,8 +19,10 @@ const featureIcon: React.CSSProperties = {
   fontSize: 20,
   marginBottom: 16,
 };
-
-export const HomePage: React.FC = () => {
+interface HomePageProps {
+  player: any;
+}
+export const HomePage: React.FC<HomePageProps> = ({ player }) => {
   const { isConnected, account } = useWallet();
 
   return (

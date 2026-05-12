@@ -4,7 +4,18 @@ import { useWallet } from '../hooks/useWallet';
 export const UploadPage: React.FC = () => {
   const { isConnected, account } = useWallet();
   const [isDragging, setIsDragging] = useState(false);
-
+  const [title, setTitle] = useState('');
+  const [genre, setGenre] = useState('');
+  const [description, setDescription] = useState('');
+  // Thêm constant style
+  const inputStyle: React.CSSProperties = {
+    width: '100%', marginTop: 6, padding: '10px 14px',
+    background: 'rgba(255,255,255,0.03)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: 6, outline: 'none',
+    color: '#e0d5b0', fontFamily: 'Georgia, serif', fontSize: 13,
+    boxSizing: 'border-box',
+  };
   if (!isConnected) {
     return (
       <div style={{
@@ -133,7 +144,88 @@ export const UploadPage: React.FC = () => {
           <span>↑</span> Choose Files
         </button>
       </div>
+      <div style={{
+        background: 'rgba(255,255,255,0.02)',
+        border: '1px solid rgba(255,255,255,0.07)',
+        borderRadius: 12,
+        padding: 24,
+      }}>
+        <div style={{
+          fontFamily: 'monospace',
+          fontSize: 10,
+          letterSpacing: '0.15em',
+          textTransform: 'uppercase',
+          color: '#5a5a6a',
+          marginBottom: 16,
+        }}>
+          FORM THÔNG TIN BÀI HÁT
+        </div>
 
+        {/* Title + Genre */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 12,
+          marginBottom: 12
+        }}>
+          <div>
+            <label style={{
+              fontFamily: 'monospace',
+              fontSize: 11,
+              color: '#6b6b7b'
+            }}>
+              Tên bài hát *
+            </label>
+
+            <input
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="Nhập tên bài hát..."
+              style={inputStyle}
+            />
+          </div>
+
+          <div>
+            <label style={{
+              fontFamily: 'monospace',
+              fontSize: 11,
+              color: '#6b6b7b'
+            }}>
+              Thể loại
+            </label>
+
+            <input
+              value={genre}
+              onChange={e => setGenre(e.target.value)}
+              placeholder="Pop / Ballad / R&B..."
+              style={inputStyle}
+            />
+          </div>
+        </div>
+
+        {/* Description */}
+        <div>
+          <label style={{
+            fontFamily: 'monospace',
+            fontSize: 11,
+            color: '#6b6b7b'
+          }}>
+            Mô tả
+          </label>
+
+          <textarea
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            placeholder="Nhập mô tả tác phẩm..."
+            rows={3}
+            style={{
+              ...inputStyle,
+              resize: 'vertical',
+              minHeight: 80
+            }}
+          />
+        </div>
+      </div>
       {/* Supported formats */}
       <div style={{
         display: 'grid',

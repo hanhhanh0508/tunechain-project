@@ -6,12 +6,13 @@ import { ROUTES } from '../constants';
 interface MainLayoutProps {
   children: React.ReactNode;
   currentPath?: string;
+  onNavigate?: (path: string) => void;
   className?: string;
 }
-
 export const MainLayout: React.FC<MainLayoutProps> = ({
   children,
   currentPath = ROUTES.HOME,
+  onNavigate,
   className = '',
 }) => {
   return (

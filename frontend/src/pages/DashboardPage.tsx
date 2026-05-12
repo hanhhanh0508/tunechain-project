@@ -37,8 +37,10 @@ const statCard = (label: string, value: string, accent: string) => (
     }}>{value}</p>
   </div>
 );
-
-export const DashboardPage: React.FC = () => {
+interface DashboardPageProps {
+  player: any;
+}
+export const DashboardPage: React.FC<DashboardPageProps> = ({ player }) => {
   const { isConnected, account } = useWallet();
 
   if (!isConnected) {
