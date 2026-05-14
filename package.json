@@ -1,12 +1,27 @@
 {
   "name": "blockchain-project",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "private": true,
+  "description": "TuneChain monorepo",
+  "workspaces": [
+    "backend",
+    "blockchain",
+    "frontend"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev:frontend": "npm run dev -w frontend",
+    "dev:backend": "npm run dev -w backend",
+    "build": "npm run -ws build --if-present",
+    "test": "npm run -ws test --if-present",
+    "lint": "npm run -ws lint --if-present",
+    "deploy:blockchain": "npm run test:blockchain && npm run deploy:rpc -w blockchain",
+    "test:blockchain": "npm run test -w blockchain"
   },
-  "keywords": [],
+  "keywords": [
+    "monorepo",
+    "blockchain",
+    "dapp"
+  ],
   "author": "",
   "license": "ISC",
   "type": "module",
@@ -46,6 +61,8 @@
     "express-rate-limit": "^8.4.1",
     "form-data": "^4.0.5",
     "mysql2": "^3.22.3",
-    "pinata-sdk": "^0.1.7"
+    "pinata-sdk": "^0.1.7",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3"
   }
 }
