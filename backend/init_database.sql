@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS view_logs (
   track_id    VARCHAR(100) NOT NULL    COMMENT 'ID track được xem',
   ip_address  VARCHAR(45)  NOT NULL    COMMENT 'IP người xem (IPv4 hoặc IPv6)',
   viewed_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Thời điểm xem',
+  -- Index idx_track_ip giúp tăng tốc độ kiểm tra Rate-limit (1 view/IP/24h) khi user gọi API View
   INDEX idx_track_ip (track_id, ip_address),
+  -- Index idx_viewed_at giúp Cron Job (cleanup) quét và xóa các log rác cũ nhanh hơn
   INDEX idx_viewed_at (viewed_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Lịch sử từng lượt xem (dùng cho rate-limit)';
 
