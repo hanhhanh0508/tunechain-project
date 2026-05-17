@@ -8,10 +8,8 @@ import "./TuneToken.sol";
 /**
  * @title TuneChain
  * @author Mem 1 - Hạnh
- * @notice Hợp đồng chính của nền tảng: upload nhạc, tip, escrow, report vi phạm
- * @dev Skeleton tuần 1 — chỉ định nghĩa struct, mapping, events.
- *      Logic sẽ được bổ sung ở tuần 2.
- *      Dùng AccessControl thay Ownable để cả nhóm 4 người đều có quyền admin.
+ * @notice Hợp đồng chính của nền tảng: upload nhạc, tip ETH, escrow 24h, report vi phạm
+ * @dev Tuần 3 — uploadTrack, tipTrack (ETH escrow), withdrawTips đã được implement
  */
 contract TuneChain is ReentrancyGuard, AccessControl {
 
@@ -22,7 +20,7 @@ contract TuneChain is ReentrancyGuard, AccessControl {
     //  Token
     // ─────────────────────────────────────────────
 
-    /// @notice Địa chỉ TuneToken (TCT) dùng để tip
+    /// @notice Địa chỉ TuneToken (TCT) dùng để tip (tuần 2 TCT flow)
     TuneToken public immutable tuneToken;
 
     // ─────────────────────────────────────────────
@@ -35,7 +33,7 @@ contract TuneChain is ReentrancyGuard, AccessControl {
      * @param creator   Địa chỉ ví của nhạc sĩ
      * @param ipfsHash  CID trỏ đến file nhạc trên IPFS/Pinata
      * @param title     Tên bài hát
-     * @param totalTips Tổng TCT đã được tip cho bài này
+     * @param totalTips Tổng ETH đã được tip (wei)
      * @param isActive  Bài hát còn hiệu lực hay đã bị gỡ
      * @param createdAt Timestamp lúc upload
      */
@@ -53,7 +51,7 @@ contract TuneChain is ReentrancyGuard, AccessControl {
      * @notice Thông tin một lần tip từ listener đến bài hát
      * @param tipper    Địa chỉ người tip
      * @param trackId   ID bài hát được tip
-     * @param amount    Số TCT đã tip
+     * @param amount    Số ETH đã tip (wei)
      * @param timestamp Thời điểm tip
      */
     struct TipRecord {
@@ -101,6 +99,19 @@ contract TuneChain is ReentrancyGuard, AccessControl {
     mapping(uint256 => uint256) public reportCount;
 
     // ─────────────────────────────────────────────
+    //  Escrow (Tuần 3 — ETH-based tipping)
+    // ─────────────────────────────────────────────
+
+    /// @notice trackId → tổng ETH đang giữ trong escrow (chưa rút)
+    mapping(uint256 => uint256) public escrowBalance;
+
+    /// @notice trackId → timestamp của lần tip cuối cùng
+    mapping(uint256 => uint256) public lastTipTime;
+
+    /// @notice Thời gian khoá escrow (24 giờ)
+    uint256 public constant ESCROW_PERIOD = 24 hours;
+
+    // ─────────────────────────────────────────────
     //  Counters
     // ─────────────────────────────────────────────
 
@@ -120,7 +131,14 @@ contract TuneChain is ReentrancyGuard, AccessControl {
         string  title
     );
 
-    /// @notice Tip thành công
+    /// @notice Tip ETH thành công — escrow 24h
+    event TipReceived(
+        uint256 indexed trackId,
+        uint256 amount,
+        address indexed sender
+    );
+
+    /// @notice Tip TCT thành công (flow tuần 2)
     event TrackTipped(
         uint256 indexed tipId,
         uint256 indexed trackId,
@@ -128,9 +146,10 @@ contract TuneChain is ReentrancyGuard, AccessControl {
         uint256 amount
     );
 
-    /// @notice Creator rút tip
+    /// @notice Creator rút tip ETH thành công
     event TipWithdrawn(
         address indexed creator,
+        uint256 indexed trackId,
         uint256 amount
     );
 
@@ -174,25 +193,116 @@ contract TuneChain is ReentrancyGuard, AccessControl {
     }
 
     // ─────────────────────────────────────────────
-    //  Placeholder functions (logic ở tuần 2)
+    //  Core Functions — Tuần 3
     // ─────────────────────────────────────────────
 
-    /// @notice Upload bài hát mới — logic tuần 2
-    function uploadTrack(string calldata /*ipfsHash*/, string calldata /*title*/) external {
-        revert("TuneChain: not implemented yet");
+    /**
+     * @notice Upload bài hát mới lên platform
+     * @param ipfsHash CID của file nhạc trên IPFS/Pinata
+     * @param title    Tên bài hát (không được rỗng)
+     * @dev Gán trackId tăng dần, lưu metadata on-chain, emit TrackUploaded
+     */
+    function uploadTrack(string calldata ipfsHash, string calldata title) external {
+        require(bytes(ipfsHash).length > 0, "TuneChain: ipfsHash cannot be empty");
+        require(bytes(title).length > 0, "TuneChain: title cannot be empty");
+
+        uint256 trackId = nextTrackId;
+
+        tracks[trackId] = Track({
+            trackId:   trackId,
+            creator:   msg.sender,
+            ipfsHash:  ipfsHash,
+            title:     title,
+            totalTips: 0,
+            isActive:  true,
+            createdAt: block.timestamp
+        });
+
+        creatorTracks[msg.sender].push(trackId);
+        nextTrackId++;
+
+        emit TrackUploaded(trackId, msg.sender, ipfsHash, title);
     }
 
-    /// @notice Tip TCT cho một bài hát — logic tuần 2
-    function tipTrack(uint256 /*trackId*/, uint256 /*amount*/) external nonReentrant {
-        revert("TuneChain: not implemented yet");
+    /**
+     * @notice Gửi tip ETH cho một bài hát — tiền được giữ trong escrow 24h
+     * @param trackId ID bài hát muốn tip
+     * @dev msg.value phải > 0; trackId phải hợp lệ và active
+     *      Mỗi lần tip mới sẽ reset đồng hồ 24h của escrow
+     */
+    function tipTrack(uint256 trackId) external payable {
+        require(msg.value > 0, "Must send ETH");
+        require(trackId < nextTrackId, "Track does not exist");
+        require(tracks[trackId].isActive, "Track is not active");
+
+        // Cộng ETH vào escrow của track này
+        escrowBalance[trackId] += msg.value;
+        // Cập nhật thời gian tip cuối — reset đồng hồ 24h
+        lastTipTime[trackId] = block.timestamp;
+        // Cập nhật tổng tips trên Track struct
+        tracks[trackId].totalTips += msg.value;
+
+        emit TipReceived(trackId, msg.value, msg.sender);
     }
 
-    /// @notice Creator rút tip về ví — logic tuần 2
-    function withdrawTips() external nonReentrant {
-        revert("TuneChain: not implemented yet");
+    /**
+     * @notice Rút toàn bộ ETH escrow của một bài hát về ví creator
+     * @param trackId ID bài hát muốn rút
+     * @dev Chỉ creator của track mới được rút; phải đợi ít nhất 24h sau lần tip
+     *      cuối cùng; phải có balance > 0
+     */
+    function withdrawTips(uint256 trackId) external nonReentrant {
+        require(trackId < nextTrackId, "Track does not exist");
+
+        Track storage track = tracks[trackId];
+        require(track.creator == msg.sender, "Not the artist");
+        require(escrowBalance[trackId] > 0, "Nothing to withdraw");
+        require(
+            block.timestamp >= lastTipTime[trackId] + ESCROW_PERIOD,
+            "Escrow period not ended"
+        );
+
+        uint256 amount = escrowBalance[trackId];
+        escrowBalance[trackId] = 0; // Reset trước khi transfer (reentrancy guard)
+
+        emit TipWithdrawn(msg.sender, trackId, amount);
+
+        // Transfer ETH về ví creator
+        (bool success, ) = payable(msg.sender).call{value: amount}("");
+        require(success, "ETH transfer failed");
     }
 
-    /// @notice Báo cáo vi phạm bản quyền — logic tuần 2
+    // ─────────────────────────────────────────────
+    //  View Functions
+    // ─────────────────────────────────────────────
+
+    /**
+     * @notice Lấy danh sách tất cả track đang active
+     * @return Mảng Track[] chứa tất cả bài hát
+     */
+    function getAllTracks() external view returns (Track[] memory) {
+        uint256 total = nextTrackId;
+        Track[] memory result = new Track[](total);
+        for (uint256 i = 0; i < total; i++) {
+            result[i] = tracks[i];
+        }
+        return result;
+    }
+
+    /**
+     * @notice Lấy danh sách trackId của một creator
+     * @param creator Địa chỉ creator
+     * @return Mảng trackId
+     */
+    function getCreatorTracks(address creator) external view returns (uint256[] memory) {
+        return creatorTracks[creator];
+    }
+
+    // ─────────────────────────────────────────────
+    //  Admin Functions (placeholder — tuần 4)
+    // ─────────────────────────────────────────────
+
+    /// @notice Báo cáo vi phạm bản quyền — logic tuần 4
     function reportTrack(uint256 /*trackId*/, string calldata /*reason*/) external {
         revert("TuneChain: not implemented yet");
     }
@@ -201,4 +311,7 @@ contract TuneChain is ReentrancyGuard, AccessControl {
     function resolveReport(uint256 /*reportId*/, bool /*removeTrack*/) external onlyRole(ADMIN_ROLE) {
         revert("TuneChain: not implemented yet");
     }
+
+    /// @notice Cho phép contract nhận ETH trực tiếp
+    receive() external payable {}
 }
