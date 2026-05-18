@@ -1,25 +1,32 @@
-// frontend/src/abi/index.ts
+// frontend/src/abi/ABI/index.ts
+// Tự động cập nhật sau mỗi lần M1 deploy + copy ABI
+
 import TuneChainJson from "./TuneChain.json";
 import TuneTokenJson from "./TuneToken.json";
 
-// Địa chỉ contract — điền sau khi M1 deploy
+// ── Địa chỉ contract (điền vào .env sau khi deploy) ─────────────
 export const TUNECHAIN_ADDRESS = import.meta.env.VITE_TUNECHAIN_ADDRESS as string;
 export const TUNETOKEN_ADDRESS  = import.meta.env.VITE_TUNETOKEN_ADDRESS  as string;
 
-// ABI thật từ Hardhat compile
+// ── ABI từ Hardhat compile ────────────────────────────────────────
 export const TUNECHAIN_ABI = TuneChainJson.abi;
 export const TUNETOKEN_ABI = TuneTokenJson.abi;
 
-// ── Types dựa theo ABI thật ─────────────────────────────────────
+// ── Types khớp với TuneChain.sol struct ──────────────────────────
 
+/**
+ * Track struct trả về từ tracks(uint256)
+ *  - isActive = true  → bài đang hoạt động
+ *  - isActive = false → bị admin deactivate
+ */
 export type TrackStruct = {
   trackId:   bigint;
   creator:   string;
-  ipfsHash:  string;   // tên thật trong contract (không phải metaCID)
-  title:     string;   // có thêm field title
-  totalTips: bigint;
-  isActive:  boolean;  // tên thật (không phải isHidden)
-  createdAt: bigint;
+  ipfsHash:  string;   // CID IPFS
+  title:     string;   // Tên bài hát
+  totalTips: bigint;   // Tổng TCT đang trong escrow
+  isActive:  boolean;  // true = active
+  createdAt: bigint;   // unix timestamp
 };
 
 export type TipRecord = {

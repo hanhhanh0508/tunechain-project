@@ -4,335 +4,436 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
 
 /**
  * @title TuneChain
- * @dev Nền tảng nhạc phi tập trung: upload track, tip escrow, stake-to-report, auto-hide, reward.
- * Tích hợp với TuneToken (TCT) làm đơn vị thanh toán.
+ * @dev Nền tảng nhạc phi tập trung: upload track, tip escrow 24h, report hệ thống.
+ *
+ *  Interface khớp với frontend (contractUtils.ts):
+ *   - uploadTrack(ipfsHash, title)         → emit TrackUploaded(trackId, creator, ipfsHash, title)
+ *   - tipTrack(trackId, amount)            → emit TrackTipped(tipId, trackId, tipper, amount)
+ *   - withdrawTips()                       → rút tất cả escrow đã unlock → emit TipWithdrawn(creator, amount)
+ *   - reportTrack(trackId, reason)         → emit TrackReported(reportId, reporter, trackId)
+ *   - resolveReport(reportId, removed)     → emit ReportResolved(reportId, removed)
+ *                                          nếu removed=true: emit TrackDeactivated(trackId)
+ *
+ *  Storage khớp:
+ *   - tracks(uint) public → Track { trackId, creator, ipfsHash, title, totalTips, isActive, createdAt }
+ *   - nextTrackId() public view
+ *   - tipRecords(uint) public → TipRecord { tipper, trackId, amount, timestamp }
+ *   - reports(uint) public   → Report { reportId, reporter, trackId, reason, resolved, createdAt }
+ *   - reportCount(trackId)   → uint256
  */
-contract TuneChain is ReentrancyGuard, Ownable {
+contract TuneChain is ReentrancyGuard, AccessControl {
     using SafeERC20 for IERC20;
 
+    // ─────────────────────────────────────────────────────────
+    // Roles
+    // ─────────────────────────────────────────────────────────
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+
+    // ─────────────────────────────────────────────────────────
+    // Token
+    // ─────────────────────────────────────────────────────────
     IERC20 public tuneToken;
 
+    // ─────────────────────────────────────────────────────────
+    // Constants
+    // ─────────────────────────────────────────────────────────
+    uint256 public constant BASE_UPLOAD_FEE  = 10 * 10**18;  // 10 TCT
+    uint256 public constant STAKE_AMOUNT     = 5  * 10**18;  // 5 TCT stake để report
+    uint256 public constant ESCROW_DURATION  = 24 hours;      // Khóa tiền 24h trước khi rút
+
+    // ─────────────────────────────────────────────────────────
+    // Structs
+    // ─────────────────────────────────────────────────────────
+
+    /**
+     * @dev Track struct — khớp field với frontend TrackStruct
+     * isActive = true  → track đang active (chưa bị ẩn)
+     * isActive = false → track bị deactivated bởi admin
+     */
     struct Track {
-        uint256 id;
+        uint256 trackId;
         address creator;
-        string metadataCID;      // CID của metadata JSON (chứa CID nhạc, ảnh bìa, tên...)
-        uint256 uploadTimestamp;
-        uint256 escrowBalance;    // Tổng token đang trong escrow của bài hát
-        uint256 lastTipTimestamp; // Thời điểm tip gần nhất (dùng để tính 24h)
-        uint256 reportCount;
-        uint256 viewCount;        // Lượt view on-chain (được sync từ off-chain DB)
-        bool isHidden;
-        uint256 penaltyCount;     // Số lần vi phạm (bị ẩn) của creator
+        string  ipfsHash;       // CID nhạc/metadata trên IPFS
+        string  title;          // Tiêu đề bài hát
+        uint256 totalTips;      // Tổng token đang trong escrow
+        bool    isActive;       // true = còn hoạt động
+        uint256 createdAt;      // block.timestamp khi upload
     }
 
-    // Trạng thái (State variables)
-    Track[] public tracks;
-    mapping(uint256 => mapping(address => bool)) public hasReported; // trackId => reporter => đã report chưa
-    mapping(uint256 => address[]) public reporters;                  // trackId => danh sách người report (để chia thưởng)
-    mapping(uint256 => mapping(address => bool)) public hasClaimedReward; // trackId => reporter => đã nhận thưởng chưa
-    mapping(uint256 => mapping(address => uint256)) public reportTimestamp; // trackId => reporter => timestamp
-    mapping(uint256 => mapping(address => bool)) public stakeProcessed; // trackId => reporter => stake processed (expired)
-    mapping(address => uint256) public creatorPenalty; // creator => penalty count (O(1))
+    /**
+     * @dev Mỗi lần ai đó tip sẽ tạo 1 TipRecord
+     */
+    struct TipRecord {
+        address tipper;
+        uint256 trackId;
+        uint256 amount;
+        uint256 timestamp;
+    }
 
-    uint256 public constant BASE_UPLOAD_FEE = 10 * 10**18;   // 10 TCT (giả định decimals 18)
-    uint256 public constant STAKE_AMOUNT = 5 * 10**18;       // 5 TCT để report
-    uint256 public constant ESCROW_DURATION = 24 hours;
-    uint256 public constant REPORT_THRESHOLD_PERCENT = 5;    // 5%
-    uint256 public constant MIN_VIEWS_FOR_REPORT = 100;
-    uint256 public constant REPORT_EXPIRY_DAYS = 30 days;    // Sau 30 ngày nếu chưa bị ẩn, stake bị burn
+    /**
+     * @dev Mỗi lần report vi phạm sẽ tạo 1 Report
+     */
+    struct Report {
+        uint256 reportId;
+        address reporter;
+        uint256 trackId;
+        string  reason;
+        bool    resolved;
+        uint256 createdAt;
+    }
 
-    address public treasury;                                  // Địa chỉ nhận 20% tiền phạt
-    address public oracle;                                    // Địa chỉ được phép sync view
+    // ─────────────────────────────────────────────────────────
+    // State
+    // ─────────────────────────────────────────────────────────
+    uint256 public nextTrackId;    // Bắt đầu từ 1, tăng dần khi upload
+    uint256 public nextTipId;
+    uint256 public nextReportId;
 
-    // Events
-    event TrackUploaded(uint256 indexed trackId, address indexed creator, string metadataCID, uint256 timestamp);
-    event TipReceived(uint256 indexed trackId, address indexed tipper, uint256 amount, uint256 timestamp);
-    event TipsWithdrawn(uint256 indexed trackId, address indexed creator, uint256 amount);
-    event TrackHidden(uint256 indexed trackId, uint256 reportCount, uint256 viewCount);
-    event RewardClaimed(uint256 indexed trackId, address indexed reporter, uint256 reward);
-    event ViewsSynced(uint256 indexed trackId, uint256 newViewCount);
-    event OracleUpdated(address newOracle);
+    mapping(uint256 => Track)      public tracks;
+    mapping(uint256 => TipRecord)  public tipRecords;
+    mapping(uint256 => Report)     public reports;
+
+    // reportCount[trackId] = số lần report chưa resolve
+    mapping(uint256 => uint256) public reportCount;
+
+    // escrowBalance[creator] = tổng TCT đang bị khóa escrow chưa đủ 24h
+    // escrowUnlockTime[creator] = thời điểm có thể rút (= lastTipTime + 24h)
+    mapping(address => uint256) private _escrowBalance;
+    mapping(address => uint256) private _escrowUnlockTime;
+
+    address public treasury;
+
+    // ─────────────────────────────────────────────────────────
+    // Events — khớp với contractUtils.ts
+    // ─────────────────────────────────────────────────────────
+    event TrackUploaded(uint256 indexed trackId, address indexed creator, string ipfsHash, string title);
+    event TrackTipped(uint256 indexed tipId, uint256 indexed trackId, address indexed tipper, uint256 amount);
+    event TipWithdrawn(address indexed creator, uint256 amount);
+    event TrackReported(uint256 indexed reportId, address indexed reporter, uint256 indexed trackId);
+    event ReportResolved(uint256 indexed reportId, bool removed);
+    event TrackDeactivated(uint256 indexed trackId);
     event TreasuryUpdated(address newTreasury);
-    event Reported(uint256 indexed trackId, address indexed reporter, uint256 timestamp);
-    event StakeProcessed(uint256 indexed trackId, address indexed reporter, uint256 amount);
 
-    // ================================
+    // ─────────────────────────────────────────────────────────
     // Modifiers
-    // ================================
-    modifier onlyOracle() {
-        require(msg.sender == oracle, "TuneChain: only oracle");
-        _;
-    }
-
+    // ─────────────────────────────────────────────────────────
     modifier trackExists(uint256 trackId) {
-        require(trackId < tracks.length, "TuneChain: track does not exist");
+        require(trackId > 0 && trackId < nextTrackId, "TuneChain: track does not exist");
         _;
     }
 
-    modifier notHidden(uint256 trackId) {
-        require(!tracks[trackId].isHidden, "TuneChain: track is hidden");
+    modifier trackActive(uint256 trackId) {
+        require(tracks[trackId].isActive, "TuneChain: track is not active");
         _;
     }
 
-    modifier onlyCreator(uint256 trackId) {
-        require(tracks[trackId].creator == msg.sender, "TuneChain: not creator");
-        _;
-    }
-
-    // ================================
+    // ─────────────────────────────────────────────────────────
     // Constructor
-    // ================================
-    constructor(address _tokenAddress, address _treasury, address _oracle) Ownable(msg.sender) {
+    // ─────────────────────────────────────────────────────────
+    /**
+     * @param _tokenAddress Địa chỉ TuneToken (TCT)
+     * @param _treasury     Địa chỉ nhận phí (upload fee)
+     * @param _admins       Danh sách địa chỉ được cấp ADMIN_ROLE
+     */
+    constructor(
+        address _tokenAddress,
+        address _treasury,
+        address[] memory _admins
+    ) {
         tuneToken = IERC20(_tokenAddress);
-        treasury = _treasury;
-        oracle = _oracle;
+        treasury  = _treasury;
+
+        // Cấp DEFAULT_ADMIN_ROLE và ADMIN_ROLE cho deployer
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(ADMIN_ROLE, msg.sender);
+
+        // Cấp ADMIN_ROLE cho danh sách admins truyền vào
+        for (uint i = 0; i < _admins.length; i++) {
+            if (_admins[i] != address(0)) {
+                _grantRole(ADMIN_ROLE, _admins[i]);
+            }
+        }
+
+        nextTrackId  = 1; // Track ID bắt đầu từ 1
+        nextTipId    = 1;
+        nextReportId = 1;
     }
 
-    // ================================
-    // Functions
-    // ================================
+    // ─────────────────────────────────────────────────────────
+    // WRITE — Core business logic
+    // ─────────────────────────────────────────────────────────
 
     /**
-     * @dev Upload bài hát mới (mint NFT về mặt kỹ thuật là tạo record track).
-     * @param metadataCID CID của metadata JSON (chứa thông tin bài hát, link IPFS nhạc và ảnh bìa)
+     * @notice UC-02: Creator upload bài hát mới.
+     * @dev    Trả phí upload BASE_UPLOAD_FEE TCT (chuyển vào treasury).
+     *         Người dùng phải approve TuneChain trước khi gọi hàm này.
+     * @param ipfsHash CID của file nhạc/metadata trên IPFS
+     * @param title    Tiêu đề bài hát hiển thị
      */
-    function uploadTrack(string memory metadataCID) external {
-        uint256 penaltyCount = creatorPenalty[msg.sender];
-        // tăng 50% mỗi lần vi phạm: uploadFee = BASE * (1 + 0.5 * penaltyCount)
-        uint256 uploadFee = (BASE_UPLOAD_FEE * (100 + penaltyCount * 50)) / 100;
-        tuneToken.safeTransferFrom(msg.sender, address(this), uploadFee);
+    function uploadTrack(string memory ipfsHash, string memory title)
+        external
+        nonReentrant
+    {
+        require(bytes(ipfsHash).length > 0, "TuneChain: ipfsHash cannot be empty");
+        require(bytes(title).length > 0,    "TuneChain: title cannot be empty");
 
-        uint256 trackId = tracks.length;
-        tracks.push(Track({
-            id: trackId,
-            creator: msg.sender,
-            metadataCID: metadataCID,
-            uploadTimestamp: block.timestamp,
-            escrowBalance: 0,
-            lastTipTimestamp: 0,
-            reportCount: 0,
-            viewCount: 0,
-            isHidden: false,
-            penaltyCount: penaltyCount
-        }));
+        // Thu phí upload, chuyển thẳng vào treasury
+        tuneToken.safeTransferFrom(msg.sender, treasury, BASE_UPLOAD_FEE);
 
-        emit TrackUploaded(trackId, msg.sender, metadataCID, block.timestamp);
+        uint256 trackId = nextTrackId;
+        nextTrackId++;
+
+        tracks[trackId] = Track({
+            trackId:   trackId,
+            creator:   msg.sender,
+            ipfsHash:  ipfsHash,
+            title:     title,
+            totalTips: 0,
+            isActive:  true,
+            createdAt: block.timestamp
+        });
+
+        emit TrackUploaded(trackId, msg.sender, ipfsHash, title);
     }
 
     /**
-     * @dev Người nghe tip token vào escrow của bài hát.
-     * @param trackId ID của bài hát
-     * @param amount Số lượng token tip (phải lớn hơn 0)
+     * @notice UC-04: Listener tip TCT cho tác giả của 1 track.
+     * @dev    Token được khóa trong escrow của creator 24h.
+     *         Mỗi lần tip mới → reset đồng hồ 24h (lastTipTimestamp của creator).
+     *         Người dùng phải approve TuneChain trước khi gọi hàm này.
+     * @param trackId ID của bài hát nhận tip
+     * @param amount  Số TCT muốn tip (18 decimals)
      */
-    function tip(uint256 trackId, uint256 amount) external trackExists(trackId) notHidden(trackId) nonReentrant {
+    function tipTrack(uint256 trackId, uint256 amount)
+        external
+        trackExists(trackId)
+        trackActive(trackId)
+        nonReentrant
+    {
         require(amount > 0, "TuneChain: amount must be > 0");
+
+        // Lấy token từ ví người tip về contract
         tuneToken.safeTransferFrom(msg.sender, address(this), amount);
 
-        Track storage track = tracks[trackId];
-        track.escrowBalance += amount;
-        track.lastTipTimestamp = block.timestamp;
+        // Ghi nhận TipRecord
+        uint256 tipId = nextTipId;
+        nextTipId++;
+        tipRecords[tipId] = TipRecord({
+            tipper:    msg.sender,
+            trackId:   trackId,
+            amount:    amount,
+            timestamp: block.timestamp
+        });
 
-        emit TipReceived(trackId, msg.sender, amount, block.timestamp);
+        // Cộng vào totalTips của track
+        tracks[trackId].totalTips += amount;
+
+        // Cộng vào escrow của creator và reset thời gian unlock
+        address creator = tracks[trackId].creator;
+        _escrowBalance[creator]    += amount;
+        _escrowUnlockTime[creator]  = block.timestamp + ESCROW_DURATION;
+
+        emit TrackTipped(tipId, trackId, msg.sender, amount);
     }
 
     /**
-     * @dev Creator rút tiền tip sau 24h (nếu bài chưa bị ẩn).
-     * @param trackId ID của bài hát
+     * @notice UC-05: Creator rút toàn bộ tips đã unlock khỏi escrow.
+     * @dev    Escrow lock 24h tính từ lần tip cuối cùng vào bất kỳ track nào của creator.
+     *         Nếu trong 24h có tip mới → đồng hồ reset lại từ đầu.
+     *         Chỉ rút được khi không còn track nào của creator đang bị lock.
      */
-    function withdrawTips(uint256 trackId) external trackExists(trackId) onlyCreator(trackId) nonReentrant {
-        Track storage track = tracks[trackId];
-        require(!track.isHidden, "TuneChain: track is hidden, cannot withdraw");
-        require(block.timestamp >= track.lastTipTimestamp + ESCROW_DURATION, "TuneChain: escrow still locked");
+    function withdrawTips()
+        external
+        nonReentrant
+    {
+        uint256 amount = _escrowBalance[msg.sender];
+        require(amount > 0, "TuneChain: no tips to withdraw");
+        require(
+            block.timestamp >= _escrowUnlockTime[msg.sender],
+            "TuneChain: escrow still locked (wait 24h after last tip)"
+        );
 
-        uint256 amount = track.escrowBalance;
-        require(amount > 0, "TuneChain: no balance to withdraw");
-        track.escrowBalance = 0;
+        // Reset trước khi transfer (checks-effects-interactions)
+        _escrowBalance[msg.sender]   = 0;
+        _escrowUnlockTime[msg.sender] = 0;
 
         tuneToken.safeTransfer(msg.sender, amount);
-        emit TipsWithdrawn(trackId, msg.sender, amount);
+        emit TipWithdrawn(msg.sender, amount);
     }
 
     /**
-     * @dev Người dùng báo cáo vi phạm bản quyền (stake 5 TCT).
-     * @param trackId ID của bài hát
+     * @notice UC-06: Người dùng báo cáo vi phạm bản quyền.
+     * @dev    Không cần stake TCT ở phiên bản này (admin resolve thủ công).
+     * @param trackId ID của bài hát bị report
+     * @param reason  Lý do báo cáo
      */
-    function report(uint256 trackId) external trackExists(trackId) notHidden(trackId) nonReentrant {
+    function reportTrack(uint256 trackId, string memory reason)
+        external
+        trackExists(trackId)
+        trackActive(trackId)
+        nonReentrant
+    {
         require(msg.sender != tracks[trackId].creator, "TuneChain: cannot report own track");
-        require(!hasReported[trackId][msg.sender], "TuneChain: already reported");
-        tuneToken.safeTransferFrom(msg.sender, address(this), STAKE_AMOUNT);
+        require(bytes(reason).length > 0, "TuneChain: reason cannot be empty");
 
-        Track storage track = tracks[trackId];
-        track.reportCount++;
-        hasReported[trackId][msg.sender] = true;
-        reporters[trackId].push(msg.sender);
-        reportTimestamp[trackId][msg.sender] = block.timestamp;
-        stakeProcessed[trackId][msg.sender] = false;
-        emit Reported(trackId, msg.sender, block.timestamp);
+        uint256 reportId = nextReportId;
+        nextReportId++;
 
-        // Kiểm tra auto-hide
-        if (track.viewCount > MIN_VIEWS_FOR_REPORT) {
-            uint256 ratio = (track.reportCount * 100) / track.viewCount;
-            if (ratio > REPORT_THRESHOLD_PERCENT) {
-                _hideTrack(trackId);
+        reports[reportId] = Report({
+            reportId:  reportId,
+            reporter:  msg.sender,
+            trackId:   trackId,
+            reason:    reason,
+            resolved:  false,
+            createdAt: block.timestamp
+        });
+
+        reportCount[trackId]++;
+
+        emit TrackReported(reportId, msg.sender, trackId);
+    }
+
+    /**
+     * @notice Admin resolve một report.
+     * @dev    Chỉ địa chỉ có ADMIN_ROLE mới gọi được.
+     *         Nếu removed = true → deactivate track, tịch thu escrow vào treasury.
+     * @param reportId ID của report cần resolve
+     * @param removed  true = ẩn track; false = bác bỏ report
+     */
+    function resolveReport(uint256 reportId, bool removed)
+        external
+        onlyRole(ADMIN_ROLE)
+        nonReentrant
+    {
+        require(reportId > 0 && reportId < nextReportId, "TuneChain: report does not exist");
+        Report storage r = reports[reportId];
+        require(!r.resolved, "TuneChain: already resolved");
+
+        r.resolved = true;
+
+        if (removed) {
+            uint256 trackId = r.trackId;
+            Track storage track = tracks[trackId];
+            require(track.isActive, "TuneChain: track already deactivated");
+            track.isActive = false;
+
+            // Tịch thu toàn bộ escrow của creator → treasury
+            address creator = track.creator;
+            uint256 seized  = _escrowBalance[creator];
+            if (seized > 0) {
+                _escrowBalance[creator]    = 0;
+                _escrowUnlockTime[creator] = 0;
+                tuneToken.safeTransfer(treasury, seized);
             }
-        }
-    }
 
-    /**
-     * @dev Hàm nội bộ để ẩn bài và xử lý tịch thu escrow, tăng penalty.
-     */
-    function _hideTrack(uint256 trackId) internal {
-        Track storage track = tracks[trackId];
-        require(!track.isHidden, "TuneChain: already hidden");
-        track.isHidden = true;
-        track.penaltyCount++; // Tăng số lần vi phạm
-        creatorPenalty[track.creator] += 1;
-
-        // Tịch thu toàn bộ escrow
-        uint256 seized = track.escrowBalance;
-        track.escrowBalance = 0;
-        if (seized > 0) {
-            // 80% giữ lại để chia cho reporters, 20% chuyển vào treasury
-            uint256 reporterRewardPool = (seized * 80) / 100;
-            uint256 treasuryShare = seized - reporterRewardPool;
-            _setRewardPool(trackId, reporterRewardPool);
-            if (treasuryShare > 0) {
-                tuneToken.safeTransfer(treasury, treasuryShare);
-            }
+            emit TrackDeactivated(trackId);
         }
 
-        emit TrackHidden(trackId, track.reportCount, track.viewCount);
+        emit ReportResolved(reportId, removed);
     }
 
-    mapping(uint256 => uint256) public rewardPool; // trackId => tổng token thưởng cho reporters
-
-    function _setRewardPool(uint256 trackId, uint256 amount) internal {
-        rewardPool[trackId] = amount;
-    }
+    // ─────────────────────────────────────────────────────────
+    // READ — View functions
+    // ─────────────────────────────────────────────────────────
 
     /**
-     * @dev Người report nhận thưởng (pull model). Mỗi reporter chỉ nhận một lần.
-     * @param trackId ID của bài hát đã bị ẩn
+     * @dev Lấy thông tin escrow của 1 creator (tiền đang bị lock + thời gian unlock).
+     * @param creator Địa chỉ creator
+     * @return balance     Số TCT đang trong escrow
+     * @return unlockTime  Thời điểm có thể rút (unix timestamp)
      */
-    function claimReward(uint256 trackId) external nonReentrant {
-        require(tracks[trackId].isHidden, "TuneChain: track not hidden");
-        require(!hasClaimedReward[trackId][msg.sender], "TuneChain: already claimed");
-        require(hasReported[trackId][msg.sender], "TuneChain: not a reporter");
-        require(!stakeProcessed[trackId][msg.sender], "TuneChain: stake processed, ineligible");
-
-        uint256 pool = rewardPool[trackId];
-        require(pool > 0, "TuneChain: no reward pool");
-
-        // Count eligible reporters (exclude those whose stake was processed/expired)
-        uint256 eligible = 0;
-        address[] storage reps = reporters[trackId];
-        for (uint i = 0; i < reps.length; i++) {
-            address r = reps[i];
-            if (hasReported[trackId][r] && !stakeProcessed[trackId][r]) {
-                eligible++;
-            }
-        }
-        require(eligible > 0, "TuneChain: no eligible reporters");
-
-        uint256 share = pool / eligible; // Chia đều 80% seized
-        uint256 stakeBack = STAKE_AMOUNT;     // Trả lại tiền cọc
-
-        hasClaimedReward[trackId][msg.sender] = true;
-        uint256 totalReward = share + stakeBack;
-        tuneToken.safeTransfer(msg.sender, totalReward);
-
-        emit RewardClaimed(trackId, msg.sender, totalReward);
+    function getEscrowInfo(address creator)
+        external
+        view
+        returns (uint256 balance, uint256 unlockTime)
+    {
+        return (_escrowBalance[creator], _escrowUnlockTime[creator]);
     }
 
     /**
-     * @dev Xử lý stake đã quá hạn (nếu báo cáo không dẫn tới ẩn trong REPORT_EXPIRY_DAYS)
-     * Chuyển stake sang `treasury` để tránh reporter giữ stake vô thời hạn.
+     * @dev Kiểm tra creator có thể rút tips ngay bây giờ không.
      */
-    function processExpiredReport(uint256 trackId, address reporter) external nonReentrant trackExists(trackId) {
-        require(!tracks[trackId].isHidden, "TuneChain: track already hidden");
-        require(hasReported[trackId][reporter], "TuneChain: not a reporter");
-        require(!stakeProcessed[trackId][reporter], "TuneChain: already processed");
-        uint256 ts = reportTimestamp[trackId][reporter];
-        require(ts > 0, "TuneChain: no timestamp");
-        require(block.timestamp >= ts + REPORT_EXPIRY_DAYS, "TuneChain: not yet expired");
-
-        stakeProcessed[trackId][reporter] = true;
-        tuneToken.safeTransfer(treasury, STAKE_AMOUNT);
-
-        emit StakeProcessed(trackId, reporter, STAKE_AMOUNT);
+    function canWithdraw(address creator) external view returns (bool) {
+        return (
+            _escrowBalance[creator] > 0 &&
+            block.timestamp >= _escrowUnlockTime[creator]
+        );
     }
 
     /**
-     * @dev Oracle cập nhật lượt view on-chain từ off-chain database.
-     * @param trackId ID bài hát
-     * @param newViewCount Tổng lượt view mới (tích lũy)
-     */
-    function syncViews(uint256 trackId, uint256 newViewCount) external onlyOracle trackExists(trackId) {
-        Track storage track = tracks[trackId];
-        // Không cho phép giảm view
-        require(newViewCount >= track.viewCount, "TuneChain: invalid view count");
-        track.viewCount = newViewCount;
-        emit ViewsSynced(trackId, newViewCount);
-    }
-
-    /**
-     * @dev Hàm helper để lấy số lần vi phạm của creator dựa trên các track đã bị ẩn.
-     * @param creator Địa chỉ tác giả
-     */
-    
-
-    /**
-     * @dev Lấy thông tin chi tiết một track.
-     */
-    function getTrack(uint256 trackId) external view returns (Track memory) {
-        return tracks[trackId];
-    }
-
-    /**
-     * @dev Lấy danh sách tất cả track chưa bị ẩn (dùng cho UI).
+     * @dev Lấy danh sách tất cả track đang active (dùng cho UI).
+     *      Vòng lặp O(n) — chỉ dùng cho read-only call, không tốn gas trực tiếp.
      */
     function getAllActiveTracks() external view returns (Track[] memory) {
+        uint256 total = nextTrackId - 1;
         uint256 activeCount = 0;
-        for (uint i = 0; i < tracks.length; i++) {
-            if (!tracks[i].isHidden) activeCount++;
+
+        for (uint256 i = 1; i <= total; i++) {
+            if (tracks[i].isActive) activeCount++;
         }
-        Track[] memory activeTracks = new Track[](activeCount);
-        uint256 index = 0;
-        for (uint i = 0; i < tracks.length; i++) {
-            if (!tracks[i].isHidden) {
-                activeTracks[index] = tracks[i];
-                index++;
+
+        Track[] memory result = new Track[](activeCount);
+        uint256 idx = 0;
+        for (uint256 i = 1; i <= total; i++) {
+            if (tracks[i].isActive) {
+                result[idx] = tracks[i];
+                idx++;
             }
         }
-        return activeTracks;
+        return result;
     }
 
     /**
-     * @dev Cập nhật địa chỉ oracle (chỉ owner).
+     * @dev Lấy danh sách trackId của 1 creator (để hiển thị trang profile).
      */
-    function setOracle(address newOracle) external onlyOwner {
-        oracle = newOracle;
-        emit OracleUpdated(newOracle);
+    function getCreatorTracks(address creator)
+        external
+        view
+        returns (uint256[] memory)
+    {
+        uint256 total = nextTrackId - 1;
+        uint256 count = 0;
+
+        for (uint256 i = 1; i <= total; i++) {
+            if (tracks[i].creator == creator) count++;
+        }
+
+        uint256[] memory result = new uint256[](count);
+        uint256 idx = 0;
+        for (uint256 i = 1; i <= total; i++) {
+            if (tracks[i].creator == creator) {
+                result[idx] = i;
+                idx++;
+            }
+        }
+        return result;
     }
 
+    // ─────────────────────────────────────────────────────────
+    // Admin
+    // ─────────────────────────────────────────────────────────
+
     /**
-     * @dev Cập nhật treasury (chỉ owner).
+     * @dev Cập nhật treasury (chỉ DEFAULT_ADMIN_ROLE).
      */
-    function setTreasury(address newTreasury) external onlyOwner {
+    function setTreasury(address newTreasury) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newTreasury != address(0), "TuneChain: zero address");
         treasury = newTreasury;
         emit TreasuryUpdated(newTreasury);
     }
 
     /**
-     * @dev Fallback: hủy token gửi nhầm (nếu có ai gửi trực tiếp TCT vào contract, có thể rút ra treasury)
-     * Thực tế không khuyến khích, nhưng để an toàn.
+     * @dev Khẩn cấp: rút token gửi nhầm (không phải TCT) về treasury.
      */
-    function recoverTokens(address tokenAddr, uint256 amount) external onlyOwner {
+    function recoverTokens(address tokenAddr, uint256 amount)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
         require(tokenAddr != address(tuneToken), "TuneChain: cannot recover TCT");
-        IERC20(tokenAddr).safeTransfer(owner(), amount);
+        IERC20(tokenAddr).safeTransfer(treasury, amount);
     }
 }
