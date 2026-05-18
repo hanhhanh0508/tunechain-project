@@ -1,9 +1,10 @@
 // frontend/src/utils/contractUtils.ts
-import { ethers, BrowserProvider, Signer, Contract, formatUnits, parseUnits } from "ethers";
+import { ethers, BrowserProvider, Contract, formatUnits, parseUnits } from "ethers";
+import type { Signer } from "ethers";
 import {
   TUNECHAIN_ABI, TUNECHAIN_ADDRESS,
   TUNETOKEN_ABI,  TUNETOKEN_ADDRESS,
-} from "../abi/index";
+} from "../abi/ABI/index";
 
 // ─────────────────────────────────────────────────────────────
 // 1. Provider & Signer
@@ -252,7 +253,12 @@ export async function checkAndSwitchNetwork(targetChainId = HARDHAT_CHAIN_ID) {
   const network  = await provider.getNetwork();
 
   if (Number(network.chainId) !== targetChainId) {
-    await window.ethereum.request({
+    const ethereum = window.ethereum;
+    if (!ethereum) {
+      throw new Error("MetaMask chưa cài — không thể chuyển network");
+    }
+
+    await ethereum.request({
       method: "wallet_switchEthereumChain",
       params: [{ chainId: `0x${targetChainId.toString(16)}` }],
     });
