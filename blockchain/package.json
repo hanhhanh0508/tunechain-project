@@ -16,6 +16,7 @@
   "license": "ISC",
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^4.0.11",
+    "@nomicfoundation/hardhat-ethers-chai-matchers": "^3.0.8",
     "@nomicfoundation/hardhat-ignition": "^3.1.5",
     "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.5",
     "@types/chai": "^5.2.3",

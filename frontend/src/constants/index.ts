@@ -3,9 +3,17 @@ import type { NetworkConfig } from '../types/wallet';
 // Supported networks
 export const SEPOLIA_CHAIN_ID = 11155111;
 export const ETHEREUM_MAINNET_CHAIN_ID = 1;
+export const HARDHAT_CHAIN_ID = 31337;   // ← THÊM
+
 
 // Network configurations
 export const NETWORKS: Record<number, NetworkConfig> = {
+  [HARDHAT_CHAIN_ID]: {              // ← THÊM
+    chainId: HARDHAT_CHAIN_ID,
+    name: 'Hardhat Local',
+    rpcUrl: 'http://127.0.0.1:8545',
+    explorerUrl: '',
+  },
   [SEPOLIA_CHAIN_ID]: {
     chainId: SEPOLIA_CHAIN_ID,
     name: 'Sepolia Testnet',
@@ -21,8 +29,8 @@ export const NETWORKS: Record<number, NetworkConfig> = {
 };
 
 // Default network for the app
-export const DEFAULT_CHAIN_ID = SEPOLIA_CHAIN_ID;
-
+//export const DEFAULT_CHAIN_ID = SEPOLIA_CHAIN_ID;
+export const DEFAULT_CHAIN_ID = HARDHAT_CHAIN_ID;
 // App configuration
 export const APP_NAME = 'TuneChain';
 export const APP_DESCRIPTION = 'Blockchain Music Platform';
