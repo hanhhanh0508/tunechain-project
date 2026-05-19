@@ -4,12 +4,12 @@
 
 import express, { Request, Response } from "express";
 import cors from "cors";
-import { env } from "./config/env.js";
-import { testConnection, initDatabase } from "./config/database.js";
-import { testPinataConnection } from "./services/ipfsService.js";
-import { startCleanupJob } from "./jobs/cleanupJob.js";
-import viewRouter from "./api/viewApi.js";
-import uploadRouter from "./api/uploadApi.js";
+import { env } from "./config/env";
+import { testConnection, initDatabase } from "./config/database";
+import { testPinataConnection } from "./services/ipfsService";
+import { startCleanupJob } from "./jobs/cleanupJob";
+import viewRouter from "./api/viewApi";
+import uploadRouter from "./api/uploadApi";
 
 const app = express();
 

@@ -2,7 +2,7 @@
 // Kết nối MySQL và khởi tạo bảng nếu chưa có
 
 import mysql from "mysql2/promise";
-import { env } from "./env.js";
+import { env } from "./env";
 
 // Tạo connection pool (dùng chung cho toàn app, hiệu quả hơn tạo mới mỗi request)
 export const pool = mysql.createPool({

@@ -4,7 +4,7 @@
 
 import axios from "axios";
 import FormData from "form-data";
-import { env } from "../config/env.js";
+import { env } from "../config/env";
 
 const PINATA_BASE_URL = "https://api.pinata.cloud";
 

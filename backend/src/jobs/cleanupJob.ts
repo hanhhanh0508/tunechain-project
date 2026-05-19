@@ -2,7 +2,7 @@
 // Job chạy định kỳ để dọn dẹp bảng view_logs (xoá log cũ)
 // Tránh bảng phình quá to sau nhiều tháng sử dụng
 
-import { cleanupOldLogs } from "../services/viewService.js";
+import { cleanupOldLogs } from "../services/viewService";
 
 /**
  * Khởi động job dọn dẹp định kỳ

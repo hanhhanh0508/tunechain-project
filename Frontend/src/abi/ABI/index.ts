@@ -1,48 +1,60 @@
 // frontend/src/abi/ABI/index.ts
-// Tự động cập nhật sau mỗi lần M1 deploy + copy ABI
+// Tự động cập nhật sau mỗi lần blockchain/scripts/deploy.ts chạy
 
-import TuneChainJson from "./TuneChain.json";
-import TuneTokenJson from "./TuneToken.json";
+import TuneChainJson from './TuneChain.json';
+import TuneTokenJson from './TuneToken.json';
 
-// ── Địa chỉ contract (điền vào .env sau khi deploy) ─────────────
-export const TUNECHAIN_ADDRESS = import.meta.env.VITE_TUNECHAIN_ADDRESS as string;
-export const TUNETOKEN_ADDRESS  = import.meta.env.VITE_TUNETOKEN_ADDRESS  as string;
+// ── Địa chỉ contract (điền vào .env sau khi deploy) ─────────────────────────
+// Ưu tiên: VITE_TUNECHAIN_ADDRESS (deploy mới) > fallback hardhat local default
+export const TUNECHAIN_ADDRESS = (
+  import.meta.env.VITE_TUNECHAIN_ADDRESS as string
+) ?? '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0';
 
-// ── ABI từ Hardhat compile ────────────────────────────────────────
+export const TUNETOKEN_ADDRESS = (
+  import.meta.env.VITE_TUNETOKEN_ADDRESS as string
+) ?? '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512';
+
+// ── ABI từ Hardhat compile ───────────────────────────────────────────────────
 export const TUNECHAIN_ABI = TuneChainJson.abi;
 export const TUNETOKEN_ABI = TuneTokenJson.abi;
 
-// ── Types khớp với TuneChain.sol struct ──────────────────────────
+// ── Types khớp với TuneChain.sol struct ─────────────────────────────────────
 
 /**
- * Track struct trả về từ tracks(uint256)
+ * Track struct trả về từ tracks(uint256) hoặc getAllActiveTracks()
+ *  - trackId bắt đầu từ 1 (contract mới)
  *  - isActive = true  → bài đang hoạt động
  *  - isActive = false → bị admin deactivate
  */
 export type TrackStruct = {
-  trackId:   bigint;
-  creator:   string;
-  ipfsHash:  string;   // CID IPFS
-  title:     string;   // Tên bài hát
-  totalTips: bigint;   // Tổng TCT đang trong escrow
-  isActive:  boolean;  // true = active
-  createdAt: bigint;   // unix timestamp
+  trackId: bigint;
+  creator: string;
+  ipfsHash: string;   // CID IPFS
+  title: string;      // Tên bài hát
+  totalTips: bigint;  // Tổng TCT đang trong escrow
+  isActive: boolean;  // true = active
+  createdAt: bigint;  // unix timestamp
 };
 
 export type TipRecord = {
-  tipper:    string;
-  trackId:   bigint;
-  amount:    bigint;
+  tipper: string;
+  trackId: bigint;
+  amount: bigint;
   timestamp: bigint;
 };
 
 export type ReportRecord = {
-  reportId:  bigint;
-  reporter:  string;
-  trackId:   bigint;
-  reason:    string;
-  resolved:  boolean;
+  reportId: bigint;
+  reporter: string;
+  trackId: bigint;
+  reason: string;
+  resolved: boolean;
   createdAt: bigint;
 };
 
-export type TxStatus = "idle" | "pending" | "confirmed" | "failed";
+export type EscrowInfo = {
+  balance: bigint;
+  unlockTime: bigint;
+};
+
+export type TxStatus = 'idle' | 'pending' | 'confirmed' | 'failed';

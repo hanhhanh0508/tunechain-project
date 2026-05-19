@@ -7,8 +7,8 @@ import {
   getViewCount,
   getMultipleViewCounts,
   isRateLimited,
-} from "../services/viewService.js";
-import { env } from "../config/env.js";
+} from "../services/viewService";
+import { env } from "../config/env";
 
 const router = Router();
 

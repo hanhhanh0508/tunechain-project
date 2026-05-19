@@ -2,19 +2,18 @@
 // Thay thế Firebase bằng MySQL
 // Quản lý lượt xem track: đếm, kiểm tra rate-limit theo IP
 
-import { pool } from "../config/database.js";
-import { env } from "../config/env.js";
-import { ResultSetHeader, RowDataPacket } from "mysql2";
+import { pool } from "../config/database";
+import { env } from "../config/env";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface TrackViewRow extends RowDataPacket {
+interface TrackViewRow {
   track_id: string;
   view_count: number;
   updated_at: Date;
 }
 
-interface ViewLogRow extends RowDataPacket {
+interface ViewLogRow {
   count: number;
 }
 
@@ -30,14 +29,14 @@ interface ViewLogRow extends RowDataPacket {
 export async function isRateLimited(trackId: string, ip: string): Promise<boolean> {
   const windowStart = new Date(Date.now() - env.viewRateWindowMs);
 
-  const [rows] = await pool.execute<ViewLogRow[]>(
+  const [rows] = await pool.execute(
     `SELECT COUNT(*) AS count
      FROM view_logs
      WHERE track_id = ? AND ip_address = ? AND viewed_at > ?`,
     [trackId, ip, windowStart]
   );
 
-  const count = rows[0]?.count ?? 0;
+  const count = (rows as any)[0]?.count ?? 0;
   return count >= env.viewRateLimit;
 }
 
@@ -63,7 +62,7 @@ export async function incrementView(trackId: string, ip: string): Promise<number
     );
 
     // 2. Tăng view_count (INSERT nếu chưa có, UPDATE nếu đã có)
-    await conn.execute<ResultSetHeader>(
+    await conn.execute<any>(
       `INSERT INTO track_views (track_id, view_count)
        VALUES (?, 1)
        ON DUPLICATE KEY UPDATE view_count = view_count + 1`,
@@ -71,14 +70,14 @@ export async function incrementView(trackId: string, ip: string): Promise<number
     );
 
     // 3. Lấy tổng view hiện tại
-    const [rows] = await conn.execute<TrackViewRow[]>(
+    const [rows] = await conn.execute(
       `SELECT view_count FROM track_views WHERE track_id = ?`,
       [trackId]
     );
 
     await conn.commit();
 
-    return rows[0]?.view_count ?? 1;
+    return (rows as any)[0]?.view_count ?? 1;
   } catch (error) {
     await conn.rollback();
     throw error;
@@ -94,12 +93,12 @@ export async function incrementView(trackId: string, ip: string): Promise<number
  * @param trackId  - ID của track
  */
 export async function getViewCount(trackId: string): Promise<number> {
-  const [rows] = await pool.execute<TrackViewRow[]>(
+  const [rows] = await pool.execute(
     `SELECT view_count FROM track_views WHERE track_id = ?`,
     [trackId]
   );
 
-  return rows[0]?.view_count ?? 0;
+  return (rows as any)[0]?.view_count ?? 0;
 }
 
 /**
@@ -116,7 +115,7 @@ export async function getMultipleViewCounts(
   // Tạo placeholders: ?, ?, ?
   const placeholders = trackIds.map(() => "?").join(", ");
 
-  const [rows] = await pool.execute<TrackViewRow[]>(
+  const [rows] = await pool.execute(
     `SELECT track_id, view_count FROM track_views WHERE track_id IN (${placeholders})`,
     trackIds
   );
@@ -130,7 +129,7 @@ export async function getMultipleViewCounts(
   }
 
   // Gán giá trị thực nếu có
-  for (const row of rows) {
+  for (const row of rows as any) {
     result[row.track_id] = row.view_count;
   }
 
@@ -144,10 +143,10 @@ export async function getMultipleViewCounts(
 export async function cleanupOldLogs(): Promise<number> {
   const cutoff = new Date(Date.now() - env.viewRateWindowMs * 2);
 
-  const [result] = await pool.execute<ResultSetHeader>(
+  const [result] = await pool.execute(
     `DELETE FROM view_logs WHERE viewed_at < ?`,
     [cutoff]
   );
 
-  return result.affectedRows;
+  return (result as any).affectedRows;
 }
