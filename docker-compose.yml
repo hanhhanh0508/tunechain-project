@@ -6,8 +6,8 @@ services:
     container_name: tunechain_db
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: ''
-      MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+      MYSQL_ROOT_PASSWORD: '123456'
+      MYSQL_ALLOW_EMPTY_PASSWORD: 'no'
       MYSQL_DATABASE: tunechain
     ports:
       - "3306:3306"

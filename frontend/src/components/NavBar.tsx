@@ -18,8 +18,8 @@ interface NavBarProps {
 
 const NAV_LINKS: NavLink[] = [
   { label: 'Home',      href: ROUTES.HOME,      icon: '⌂', requiresWallet: false },
-  { label: 'Upload',    href: ROUTES.UPLOAD,    icon: '↑', requiresWallet: true  },
-  { label: 'Dashboard', href: ROUTES.DASHBOARD, icon: '◈', requiresWallet: true  },
+  { label: 'Upload',    href: ROUTES.UPLOAD,    icon: '↑', requiresWallet: false },  // ← đổi true → false
+  { label: 'Dashboard', href: ROUTES.DASHBOARD, icon: '◈', requiresWallet: false },  // ← đổi true → false
 ];
 
 export const NavBar: React.FC<NavBarProps> = ({
