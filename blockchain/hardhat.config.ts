@@ -1,37 +1,26 @@
-import hardhatToolboxMochaEthersPlugin from "@nomicfoundation/hardhat-toolbox-mocha-ethers";
+import "@nomicfoundation/hardhat-ethers";
 import { configVariable, defineConfig } from "hardhat/config";
 
 export default defineConfig({
-  plugins: [hardhatToolboxMochaEthersPlugin],
   paths: {
     sources: "./contracts",
   },
+
   solidity: {
     compilers: [
       {
         version: "0.8.28",
       },
     ],
-    overrides: {
-      "contracts/TuneToken.sol": {
-        version: "0.8.28",
-      },
-    },
   },
+
   networks: {
-    hardhatMainnet: {
-      type: "edr-simulated",
-      chainType: "l1",
-    },
-    hardhatOp: {
-      type: "edr-simulated",
-      chainType: "op",
-    },
     localhost: {
       type: "http",
       chainType: "l1",
       url: "http://127.0.0.1:8545",
     },
+
     sepolia: {
       type: "http",
       chainType: "l1",
