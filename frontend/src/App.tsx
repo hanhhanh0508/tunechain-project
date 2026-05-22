@@ -1,5 +1,5 @@
 import { useState } from 'react';
-
+import { ListenerPage } from './pages/ListenerPage';  // thêm import này
 import { MainLayout } from './layouts/MainLayout';
 
 import { HomePage } from './pages/HomePage';
@@ -25,7 +25,7 @@ function App() {
   const renderPage = () => {
     switch (currentPath) {
       case ROUTES.HOME:
-        return <HomePage player={player} />;
+         return <ListenerPage player={player} />;  // ← đổi thành ListenerPage
 
       case ROUTES.UPLOAD:
         return <UploadPage />;
