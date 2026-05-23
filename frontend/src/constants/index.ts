@@ -29,8 +29,8 @@ export const NETWORKS: Record<number, NetworkConfig> = {
 };
 
 // Default network for the app
-//export const DEFAULT_CHAIN_ID = SEPOLIA_CHAIN_ID;
-export const DEFAULT_CHAIN_ID = HARDHAT_CHAIN_ID;
+export const DEFAULT_CHAIN_ID = SEPOLIA_CHAIN_ID;
+//export const DEFAULT_CHAIN_ID = HARDHAT_CHAIN_ID;
 // App configuration
 export const APP_NAME = 'TuneChain';
 export const APP_DESCRIPTION = 'Blockchain Music Platform';
