@@ -23,15 +23,16 @@ async function main() {
 
   // Mint 10000 TCT cho creator
   const tx1 = await token.mint(CREATOR_ADDRESS, ethers.parseUnits("10000", 18));
-  await tx1.wait();
-  console.log("✅ Minted 10000 TCT cho creator");
+  const receipt1 = await tx1.wait();
+  console.log("✅ Minted 10000 TCT cho creator — block:", receipt1?.blockNumber);
 
-  // Mint 10000 TCT cho listener
   const tx2 = await token.mint(LISTENER_ADDRESS, ethers.parseUnits("10000", 18));
-  await tx2.wait();
-  console.log("✅ Minted 10000 TCT cho listener");
+  const receipt2 = await tx2.wait();
+  console.log("✅ Minted 10000 TCT cho listener — block:", receipt2?.blockNumber);
 
-  // Kiểm tra balance
+    // Delay nhỏ trước khi query on-chain
+  await new Promise(r => setTimeout(r, 3000));
+
   const bal1 = await token.balanceOf(CREATOR_ADDRESS);
   const bal2 = await token.balanceOf(LISTENER_ADDRESS);
   console.log("Creator TCT:", ethers.formatUnits(bal1, 18));
