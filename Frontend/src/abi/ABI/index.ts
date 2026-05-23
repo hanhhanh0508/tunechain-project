@@ -6,14 +6,19 @@ import TuneTokenJson from './TuneToken.json';
 
 // ── Địa chỉ contract (điền vào .env sau khi deploy) ─────────────────────────
 // Ưu tiên: VITE_TUNECHAIN_ADDRESS (deploy mới) > fallback hardhat local default
-export const TUNECHAIN_ADDRESS = (
-  import.meta.env.VITE_TUNECHAIN_ADDRESS as string
-) ?? '0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9';
+// ── Địa chỉ contract ─────────────────────────────────────────────────────────
+const _tunechain = import.meta.env.VITE_TUNECHAIN_ADDRESS;
+const _tunetoken = import.meta.env.VITE_TUNETOKEN_ADDRESS;
 
-export const TUNETOKEN_ADDRESS = (
-  import.meta.env.VITE_TUNETOKEN_ADDRESS as string
-) ?? '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0';
+export const TUNECHAIN_ADDRESS: string =
+  (_tunechain && _tunechain !== 'undefined')
+    ? _tunechain
+    : '0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9';
 
+export const TUNETOKEN_ADDRESS: string =
+  (_tunetoken && _tunetoken !== 'undefined')
+    ? _tunetoken
+    : '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0';
 // ── ABI từ Hardhat compile ───────────────────────────────────────────────────
 export const TUNECHAIN_ABI = TuneChainJson.abi;
 export const TUNETOKEN_ABI = TuneTokenJson.abi;
